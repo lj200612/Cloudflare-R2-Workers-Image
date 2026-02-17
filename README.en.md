@@ -24,92 +24,117 @@ A lightweight image hosting API built on Cloudflare Workers + R2.
 - TypeScript
 - Wrangler 4
 
-## Setup and Deployment
+## One-Click Deploy on Cloudflare
 
-### 1) Prerequisites
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/lj200612/Cloudflare-R2-Workers-Image)
 
-- Node.js 20+
-- npm 10+
-- Cloudflare account
+After clicking the button, only fill the required variable:
 
-### 2) Install dependencies
+- `API_TOKEN` (required, used for admin API auth)
 
-```bash
-npm ci
+Example:
+
+```env
+API_TOKEN=replace-with-a-strong-token
 ```
 
-### 3) Login to Cloudflare
+## wrangler.toml Reference
 
-```bash
-npx wrangler login
+Current `wrangler.toml` in this project:
+
+```toml
+name = "image-hosting"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+[vars]
+ALLOWED_REFERERS = ""
+ALLOW_EMPTY_REFERER = "true"
+MAX_FILE_SIZE = "5242880"
+ALLOWED_ORIGINS = "*"
+BASE_URL = ""
+ENABLE_IMAGE_RESIZING = "false"
+RATE_LIMIT_UPLOADS_PER_MINUTE = "10"
+RATE_LIMIT_REQUESTS_PER_MINUTE = "60"
+
+[[r2_buckets]]
+binding = "IMAGE_BUCKET"
+bucket_name = "image-hosting"
+
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimitDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimitDurableObject"]
 ```
 
-### 4) Create Cloudflare resources
+### Top-level fields
 
-Create R2 bucket:
+| Field | Current value | Required | Description | Recommendation |
+| --- | --- | --- | --- | --- |
+| `name` | `image-hosting` | Yes | Worker service name in Cloudflare. | Use environment-specific names for multi-env setups. |
+| `main` | `src/index.ts` | Yes (optional for assets-only Workers) | Worker entry file. | Usually unchanged unless project layout changes. |
+| `compatibility_date` | `2024-12-01` | Yes | Controls runtime compatibility behavior. | Move forward only after regression testing. |
 
-```bash
-npx wrangler r2 bucket create image-hosting
-```
+### `[vars]` detailed reference
 
-Durable Object binding and migration are already defined in `wrangler.toml`.
+Note: `[vars]` supports text and JSON values; this project currently uses string values and parses booleans/numbers in application code.
 
-### 5) Configure environment variables
+| Variable | Default | Required | Detailed behavior | Common tuning |
+| --- | --- | --- | --- | --- |
+| `ALLOWED_REFERERS` | `""` | No | Hotlink allowlist, comma-separated, supports `*.example.com`. Empty means no referer restriction. | Set explicit domains in production. |
+| `ALLOW_EMPTY_REFERER` | `"true"` | No | Whether requests with empty referer are allowed. | Set `"false"` for stricter anti-hotlink policy. |
+| `MAX_FILE_SIZE` | `"5242880"` | No | Maximum upload size in bytes (default 5MB). | Increase/decrease based on business limits. |
+| `ALLOWED_ORIGINS` | `"*"` | No | CORS allowlist. `*` allows all origins. | Use explicit origins in production. |
+| `BASE_URL` | `""` | No | Base URL used in returned image links. Empty falls back to request host. | Set when using a custom domain. |
+| `ENABLE_IMAGE_RESIZING` | `"false"` | No | Enables transformation query params (`w/h/f/fit/preset`). | Set `"true"` only when needed. |
+| `RATE_LIMIT_UPLOADS_PER_MINUTE` | `"10"` | No | Upload rate limit per IP per minute. | Adjust with traffic and abuse patterns. |
+| `RATE_LIMIT_REQUESTS_PER_MINUTE` | `"60"` | No | Image request rate limit per IP per minute. | Increase for high-traffic read workloads. |
 
-Local development (`.dev.vars`):
+### Resource bindings and migration fields
 
-```bash
-API_TOKEN=dev-test-token-change-me
-```
+| Field | Current value | Required | Detailed behavior |
+| --- | --- | --- | --- |
+| `[[r2_buckets]].binding` | `IMAGE_BUCKET` | Yes | Worker-side variable name for R2 access, used as `env.IMAGE_BUCKET`. |
+| `[[r2_buckets]].bucket_name` | `image-hosting` | Yes | Actual R2 bucket name in your Cloudflare account. |
+| `[[durable_objects.bindings]].name` | `RATE_LIMITER` | Yes | Worker-side variable name for DO namespace, used as `env.RATE_LIMITER`. |
+| `[[durable_objects.bindings]].class_name` | `RateLimitDurableObject` | Yes | Durable Object class name; must match exported class. |
+| `[[migrations]].tag` | `v1` | Yes | Migration version label. Increment on schema/class changes (e.g. `v2`). |
+| `[[migrations]].new_sqlite_classes` | `["RateLimitDurableObject"]` | Depends on migration | Declares SQLite-backed DO classes created in this migration step. |
 
-Production secret:
+Optional `r2_buckets` fields (not enabled in current config):
 
-```bash
-npx wrangler secret put API_TOKEN
-```
+- `jurisdiction`: Sets bucket jurisdiction (when using jurisdiction constraints).
+- `preview_bucket_name`: Bucket name used in `wrangler dev` preview.
 
-### 6) Verify `wrangler.toml`
+New R2 bucket options (set when creating the bucket):
 
-- `main = "src/index.ts"`
-- `[[r2_buckets]]` binding is `IMAGE_BUCKET`
-- `[[durable_objects.bindings]]` includes `RATE_LIMITER`
-- `[[migrations]]` includes `RateLimitDurableObject`
+| Option | CLI flag | Allowed values | Notes |
+| --- | --- | --- | --- |
+| `Location` | `--location` | `apac` / `eeur` / `enam` / `weur` / `wnam` / `oc` | Location hint. If omitted, Cloudflare auto-selects (Automatic, recommended). |
+| `Default Storage Class` | `--storage-class` | `Standard` / `Infrequent Access` (common CLI values: `Standard` / `InfrequentAccess`) | Bucket default storage class. `Infrequent Access` has 30-day minimum storage duration and retrieval processing fees. |
 
-### 7) Run locally
+Location value mapping:
 
-```bash
-npm run dev
-```
+- `apac`: Asia-Pacific
+- `eeur`: Eastern Europe
+- `enam`: Eastern North America
+- `weur`: Western Europe
+- `wnam`: Western North America
+- `oc`: Oceania
 
-Health check:
-
-```bash
-curl http://127.0.0.1:8787/health
-```
-
-### 8) Type check
-
-```bash
-npm run typecheck
-```
-
-### 9) Run unit tests
-
-```bash
-npm run test
-```
-
-Coverage with thresholds:
-
-```bash
-npm run test:coverage
-```
-
-### 10) Deploy
+Example (set both when creating a bucket):
 
 ```bash
-npm run deploy
+npx wrangler r2 bucket create image-hosting --location wnam --storage-class Standard
 ```
+
+Notes:
+
+- These are bucket-creation/properties settings, not Worker binding fields.
+- In `wrangler.toml`, `[[r2_buckets]]` only needs `bucket_name` for binding.
 
 ## API
 
@@ -219,20 +244,6 @@ curl -X POST "http://127.0.0.1:8787/images/bulk-delete" \
   -H "Content-Type: application/json" \
   -d "{\"ids\":[\"<id1>\",\"<id2>\"]}"
 ```
-
-## Configuration
-
-Configured in `wrangler.toml` (`[vars]`) unless noted:
-
-- `API_TOKEN` (secret, recommended via `wrangler secret put API_TOKEN`)
-- `ALLOWED_REFERERS` (comma-separated domains, supports `*.example.com`)
-- `ALLOW_EMPTY_REFERER` (`true|false`)
-- `MAX_FILE_SIZE` (bytes, default `5242880`)
-- `ALLOWED_ORIGINS` (`*` or comma-separated origins)
-- `BASE_URL` (optional public base URL)
-- `ENABLE_IMAGE_RESIZING` (`true|false`)
-- `RATE_LIMIT_UPLOADS_PER_MINUTE` (default `10`)
-- `RATE_LIMIT_REQUESTS_PER_MINUTE` (default `60`)
 
 ## Project Structure
 

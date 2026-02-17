@@ -24,92 +24,117 @@
 - TypeScript
 - Wrangler 4
 
-## 搭建与部署
+## Cloudflare 一键部署
 
-### 1) 前置条件
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/lj200612/Cloudflare-R2-Workers-Image)
 
-- Node.js 20+
-- npm 10+
-- Cloudflare 账号
+点击按钮后，仅需填写必要变量：
 
-### 2) 安装依赖
+- `API_TOKEN`（必填，用于管理接口鉴权）
 
-```bash
-npm ci
+示例：
+
+```env
+API_TOKEN=replace-with-a-strong-token
 ```
 
-### 3) 登录 Cloudflare
+## wrangler.toml 详解
 
-```bash
-npx wrangler login
+当前项目使用的 `wrangler.toml`：
+
+```toml
+name = "image-hosting"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+[vars]
+ALLOWED_REFERERS = ""
+ALLOW_EMPTY_REFERER = "true"
+MAX_FILE_SIZE = "5242880"
+ALLOWED_ORIGINS = "*"
+BASE_URL = ""
+ENABLE_IMAGE_RESIZING = "false"
+RATE_LIMIT_UPLOADS_PER_MINUTE = "10"
+RATE_LIMIT_REQUESTS_PER_MINUTE = "60"
+
+[[r2_buckets]]
+binding = "IMAGE_BUCKET"
+bucket_name = "image-hosting"
+
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimitDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimitDurableObject"]
 ```
 
-### 4) 创建 Cloudflare 资源
+### 顶层字段说明
 
-创建 R2 存储桶：
+| 字段 | 当前值 | 必填 | 说明 | 调整建议 |
+| --- | --- | --- | --- | --- |
+| `name` | `image-hosting` | 是 | Worker 服务名（部署后在 Cloudflare 中显示的项目名）。 | 多环境建议区分命名，例如 `image-hosting-prod`。 |
+| `main` | `src/index.ts` | 是（仅静态资源 Worker 可省略） | Worker 入口文件。 | 除非你调整目录结构，一般不改。 |
+| `compatibility_date` | `2024-12-01` | 是 | 控制 Workers 运行时的兼容行为。 | 升级前先在测试环境回归，再前移日期。 |
 
-```bash
-npx wrangler r2 bucket create image-hosting
-```
+### `[vars]` 字段说明
 
-Durable Object 的 binding 和 migration 已在 `wrangler.toml` 中定义。
+说明：`[vars]` 支持文本和 JSON 值；本项目当前全部使用字符串值，再在代码里解析（如布尔值/数字）。
 
-### 5) 配置环境变量
+| 变量 | 默认值 | 必填 | 详细说明 | 常见调整 |
+| --- | --- | --- | --- | --- |
+| `ALLOWED_REFERERS` | `""` | 否 | 防盗链白名单，逗号分隔，支持 `*.example.com`。为空表示不启用 Referer 限制。 | 生产环境建议配置为你的站点域名。 |
+| `ALLOW_EMPTY_REFERER` | `"true"` | 否 | 当 Referer 为空时是否放行。 | 强防盗链可改为 `"false"`。 |
+| `MAX_FILE_SIZE` | `"5242880"` | 否 | 单文件上传大小上限（字节），默认 5MB。 | 可根据业务改大或改小。 |
+| `ALLOWED_ORIGINS` | `"*"` | 否 | CORS 允许源。`*` 表示允许全部来源。 | 生产环境建议改成显式域名白名单。 |
+| `BASE_URL` | `""` | 否 | 返回图片 URL 时使用的基础地址。为空时使用请求 Host。 | 接入自定义域名时建议填写。 |
+| `ENABLE_IMAGE_RESIZING` | `"false"` | 否 | 是否启用 `w/h/f/fit/preset` 等变换参数。 | 需要在线裁剪再改为 `"true"`。 |
+| `RATE_LIMIT_UPLOADS_PER_MINUTE` | `"10"` | 否 | 上传接口限流（每 IP 每分钟）。 | 可按流量和风控需求调整。 |
+| `RATE_LIMIT_REQUESTS_PER_MINUTE` | `"60"` | 否 | 图片访问限流（每 IP 每分钟）。 | 高并发场景通常需要提高。 |
 
-本地开发（`.dev.vars`）：
+### 资源绑定与迁移字段说明
 
-```bash
-API_TOKEN=dev-test-token-change-me
-```
+| 字段 | 当前值 | 必填 | 详细说明 |
+| --- | --- | --- | --- |
+| `[[r2_buckets]].binding` | `IMAGE_BUCKET` | 是 | Worker 内访问 R2 的变量名，对应代码中的 `env.IMAGE_BUCKET`。 |
+| `[[r2_buckets]].bucket_name` | `image-hosting` | 是 | Cloudflare 账号中的真实 R2 bucket 名称。 |
+| `[[durable_objects.bindings]].name` | `RATE_LIMITER` | 是 | Worker 内访问 DO Namespace 的变量名，对应 `env.RATE_LIMITER`。 |
+| `[[durable_objects.bindings]].class_name` | `RateLimitDurableObject` | 是 | 绑定到的 Durable Object 类名，需与代码导出一致。 |
+| `[[migrations]].tag` | `v1` | 是 | 迁移版本标签。每次新增/变更 DO 类时应递增（如 `v2`）。 |
+| `[[migrations]].new_sqlite_classes` | `["RateLimitDurableObject"]` | 取决于迁移 | 声明本次迁移要创建的 SQLite-backed DO 类。 |
 
-生产环境 secret：
+`r2_buckets` 可选字段（当前配置未启用）：
 
-```bash
-npx wrangler secret put API_TOKEN
-```
+- `jurisdiction`：指定 Bucket 所属司法辖区（若使用辖区限制）。
+- `preview_bucket_name`：`wrangler dev` 预览时使用的 Bucket 名称。
 
-### 6) 检查 `wrangler.toml`
+R2 存储桶新增配置项（创建 Bucket 时设置）：
 
-- `main = "src/index.ts"`
-- `[[r2_buckets]]` 的 binding 是 `IMAGE_BUCKET`
-- `[[durable_objects.bindings]]` 包含 `RATE_LIMITER`
-- `[[migrations]]` 包含 `RateLimitDurableObject`
+| 配置项 | CLI 参数 | 可选值 | 说明 |
+| --- | --- | --- | --- |
+| `Location` | `--location` | `apac` / `eeur` / `enam` / `weur` / `wnam` / `oc` | 位置提示。若不传，Cloudflare 自动选择（Automatic，推荐）。 |
+| `Default Storage Class` | `--storage-class` | `Standard` / `Infrequent Access`（CLI 常用值：`Standard` / `InfrequentAccess`） | 默认存储类型。Infrequent Access 有 30 天最短存储周期和读取处理费。 |
 
-### 7) 本地运行
+Location 可选值对应区域：
 
-```bash
-npm run dev
-```
+- `apac`: Asia-Pacific
+- `eeur`: Eastern Europe
+- `enam`: Eastern North America
+- `weur`: Western Europe
+- `wnam`: Western North America
+- `oc`: Oceania
 
-健康检查：
-
-```bash
-curl http://127.0.0.1:8787/health
-```
-
-### 8) 类型检查
-
-```bash
-npm run typecheck
-```
-
-### 9) 运行单元测试
-
-```bash
-npm run test
-```
-
-带覆盖率门槛：
-
-```bash
-npm run test:coverage
-```
-
-### 10) 部署
+示例（创建 Bucket 时同时指定）：
 
 ```bash
-npm run deploy
+npx wrangler r2 bucket create image-hosting --location wnam --storage-class Standard
 ```
+
+说明：
+
+- 上述两项属于 Bucket 创建/属性级配置，不是 Worker 绑定字段。
+- `wrangler.toml` 的 `[[r2_buckets]]` 里只需要绑定 `bucket_name`。
 
 ## API
 
@@ -219,20 +244,6 @@ curl -X POST "http://127.0.0.1:8787/images/bulk-delete" \
   -H "Content-Type: application/json" \
   -d "{\"ids\":[\"<id1>\",\"<id2>\"]}"
 ```
-
-## 配置项
-
-默认在 `wrangler.toml` 的 `[vars]` 中配置（除特别说明）：
-
-- `API_TOKEN`（敏感信息，建议用 `wrangler secret put API_TOKEN`）
-- `ALLOWED_REFERERS`（逗号分隔域名，支持 `*.example.com`）
-- `ALLOW_EMPTY_REFERER`（`true|false`）
-- `MAX_FILE_SIZE`（字节，默认 `5242880`）
-- `ALLOWED_ORIGINS`（`*` 或逗号分隔 origins）
-- `BASE_URL`（可选，公网基础地址）
-- `ENABLE_IMAGE_RESIZING`（`true|false`）
-- `RATE_LIMIT_UPLOADS_PER_MINUTE`（默认 `10`）
-- `RATE_LIMIT_REQUESTS_PER_MINUTE`（默认 `60`）
 
 ## 项目结构
 
