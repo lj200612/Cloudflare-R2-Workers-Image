@@ -1,6 +1,6 @@
 export interface Env {
   IMAGE_BUCKET: R2Bucket;
-  RATE_LIMIT_KV: KVNamespace;
+  RATE_LIMITER: DurableObjectNamespace;
   API_TOKEN: string;
   ALLOWED_REFERERS: string;
   ALLOW_EMPTY_REFERER: string;

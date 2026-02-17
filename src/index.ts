@@ -10,6 +10,76 @@ import { handleList } from './handlers/list';
 import { handleInfo } from './handlers/info';
 import { errorResponse, successResponse } from './utils/response';
 
+type RouteParams = Record<string, string>;
+type RouteMatch = (path: string) => RouteParams | null;
+type RouteGuard = (
+  request: Request,
+  env: Env,
+  params: RouteParams
+) => Promise<Response | null> | Response | null;
+type RouteHandler = (
+  request: Request,
+  env: Env,
+  params: RouteParams
+) => Promise<Response>;
+
+interface RouteDefinition {
+  method: 'GET' | 'POST' | 'DELETE';
+  match: RouteMatch;
+  guards: RouteGuard[];
+  handler: RouteHandler;
+}
+
+const requireAuth: RouteGuard = (request, env) => verifyAuth(request, env);
+const requireReferer: RouteGuard = (request, env) => checkReferer(request, env);
+const limitUpload: RouteGuard = (request, env) => checkRateLimit(request, env, 'upload');
+const limitRequest: RouteGuard = (request, env) => checkRateLimit(request, env, 'request');
+
+const routes: RouteDefinition[] = [
+  {
+    method: 'GET',
+    match: exactPath('/health'),
+    guards: [],
+    handler: async () => successResponse({ status: 'ok' }),
+  },
+  {
+    method: 'POST',
+    match: exactPath('/images'),
+    guards: [requireAuth, limitUpload],
+    handler: (request, env) => handleUpload(request, env),
+  },
+  {
+    method: 'POST',
+    match: exactPath('/images/bulk-delete'),
+    guards: [requireAuth],
+    handler: (request, env) => handleBulkDelete(request, env),
+  },
+  {
+    method: 'GET',
+    match: exactPath('/images'),
+    guards: [requireAuth],
+    handler: (request, env) => handleList(request, env),
+  },
+  {
+    method: 'GET',
+    match: regexPath(/^\/images\/([^/]+)\/info$/, 'id'),
+    guards: [requireAuth],
+    handler: (request, env, params) => handleInfo(request, env, params.id),
+  },
+  {
+    method: 'GET',
+    match: regexPath(/^\/images\/([^/]+)$/, 'id'),
+    guards: [requireReferer, limitRequest],
+    handler: (request, env, params) => handleServe(request, env, params.id),
+  },
+  {
+    method: 'DELETE',
+    match: regexPath(/^\/images\/([^/]+)$/, 'id'),
+    guards: [],
+    handler: (request, env, params) => handleDelete(request, env, params.id),
+  },
+];
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -46,65 +116,46 @@ async function route(
   method: string,
   path: string
 ): Promise<Response> {
-  // Health check
-  if (path === '/health' && method === 'GET') {
-    return successResponse({ status: 'ok' });
-  }
+  for (const definition of routes) {
+    if (definition.method !== method) {
+      continue;
+    }
 
-  // POST /images - Upload
-  if (path === '/images' && method === 'POST') {
-    const authErr = verifyAuth(request, env);
-    if (authErr) return authErr;
+    const params = definition.match(path);
+    if (!params) {
+      continue;
+    }
 
-    const rateLimitErr = await checkRateLimit(request, env, 'upload');
-    if (rateLimitErr) return rateLimitErr;
+    for (const guard of definition.guards) {
+      const guardError = await guard(request, env, params);
+      if (guardError) {
+        return guardError;
+      }
+    }
 
-    return handleUpload(request, env);
-  }
-
-  // POST /images/bulk-delete - Bulk delete
-  if (path === '/images/bulk-delete' && method === 'POST') {
-    const authErr = verifyAuth(request, env);
-    if (authErr) return authErr;
-
-    return handleBulkDelete(request, env);
-  }
-
-  // GET /images - List
-  if (path === '/images' && method === 'GET') {
-    const authErr = verifyAuth(request, env);
-    if (authErr) return authErr;
-
-    return handleList(request, env);
-  }
-
-  // Routes with :id parameter
-  const imageMatch = path.match(/^\/images\/([^/]+)$/);
-  const infoMatch = path.match(/^\/images\/([^/]+)\/info$/);
-
-  // GET /images/:id/info - Image metadata
-  if (infoMatch && method === 'GET') {
-    const authErr = verifyAuth(request, env);
-    if (authErr) return authErr;
-
-    return handleInfo(request, env, decodeURIComponent(infoMatch[1]));
-  }
-
-  // GET /images/:id - Serve image
-  if (imageMatch && method === 'GET') {
-    const refererErr = checkReferer(request, env);
-    if (refererErr) return refererErr;
-
-    const rateLimitErr = await checkRateLimit(request, env, 'request');
-    if (rateLimitErr) return rateLimitErr;
-
-    return handleServe(request, env, decodeURIComponent(imageMatch[1]));
-  }
-
-  // DELETE /images/:id - Delete image
-  if (imageMatch && method === 'DELETE') {
-    return handleDelete(request, env, decodeURIComponent(imageMatch[1]));
+    return definition.handler(request, env, params);
   }
 
   return errorResponse('Not found', 404);
 }
+
+function exactPath(expectedPath: string): RouteMatch {
+  return (path) => (path === expectedPath ? {} : null);
+}
+
+function regexPath(pattern: RegExp, paramName: string): RouteMatch {
+  return (path) => {
+    const match = path.match(pattern);
+    if (!match) {
+      return null;
+    }
+
+    try {
+      return { [paramName]: decodeURIComponent(match[1]) };
+    } catch {
+      return null;
+    }
+  };
+}
+
+export { RateLimitDurableObject } from './durableObjects/rateLimiter';

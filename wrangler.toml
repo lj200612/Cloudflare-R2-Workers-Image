@@ -16,6 +16,10 @@ RATE_LIMIT_REQUESTS_PER_MINUTE = "60"
 binding = "IMAGE_BUCKET"
 bucket_name = "image-hosting"
 
-[[kv_namespaces]]
-binding = "RATE_LIMIT_KV"
-id = "your-kv-namespace-id"
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimitDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimitDurableObject"]

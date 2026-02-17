@@ -3,6 +3,13 @@ import { hashIp } from '../utils/hash';
 import { parsePositiveInt } from '../utils/validation';
 import { errorResponse } from '../utils/response';
 
+const WINDOW_SECONDS = 60;
+
+interface RateLimitDecision {
+  allowed: boolean;
+  retryAfter: number;
+}
+
 export async function checkRateLimit(
   request: Request,
   env: Env,
@@ -11,28 +18,62 @@ export async function checkRateLimit(
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
   const ipHash = await hashIp(ip);
 
-  const windowSeconds = 60;
   const now = Math.floor(Date.now() / 1000);
-  const windowKey = Math.floor(now / windowSeconds);
 
   const limit =
     action === 'upload'
       ? parsePositiveInt(env.RATE_LIMIT_UPLOADS_PER_MINUTE, 10)
       : parsePositiveInt(env.RATE_LIMIT_REQUESTS_PER_MINUTE, 60);
 
-  const kvKey = `rl:${action}:${ipHash}:${windowKey}`;
+  let decision: RateLimitDecision;
+  try {
+    decision = await queryRateLimiter(env, action, ipHash, limit, now);
+  } catch {
+    return errorResponse('Rate limiter unavailable', 503);
+  }
 
-  const current = parseInt((await env.RATE_LIMIT_KV.get(kvKey)) || '0', 10);
-
-  if (current >= limit) {
+  if (!decision.allowed) {
     return errorResponse('Rate limit exceeded', 429, {
-      'Retry-After': String(windowSeconds - (now % windowSeconds)),
+      'Retry-After': String(decision.retryAfter),
     });
   }
 
-  await env.RATE_LIMIT_KV.put(kvKey, String(current + 1), {
-    expirationTtl: windowSeconds * 2,
+  return null; // within limit
+}
+
+async function queryRateLimiter(
+  env: Env,
+  action: 'upload' | 'request',
+  ipHash: string,
+  limit: number,
+  now: number
+): Promise<RateLimitDecision> {
+  const id = env.RATE_LIMITER.idFromName(`${action}:${ipHash}`);
+  const stub = env.RATE_LIMITER.get(id);
+
+  const response = await stub.fetch('https://rate-limiter/check', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      limit,
+      now,
+      windowSeconds: WINDOW_SECONDS,
+    }),
   });
 
-  return null; // within limit
+  if (!response.ok) {
+    throw new Error(`Rate limiter returned ${response.status}`);
+  }
+
+  const payload = (await response.json()) as Partial<RateLimitDecision>;
+  if (typeof payload.allowed !== 'boolean' || typeof payload.retryAfter !== 'number') {
+    throw new Error('Invalid rate limiter payload');
+  }
+
+  return {
+    allowed: payload.allowed,
+    retryAfter: Math.max(0, Math.floor(payload.retryAfter)),
+  };
 }
