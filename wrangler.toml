@@ -1,0 +1,21 @@
+name = "image-hosting"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+[vars]
+ALLOWED_REFERERS = ""
+ALLOW_EMPTY_REFERER = "true"
+MAX_FILE_SIZE = "5242880"
+ALLOWED_ORIGINS = "*"
+BASE_URL = ""
+ENABLE_IMAGE_RESIZING = "false"
+RATE_LIMIT_UPLOADS_PER_MINUTE = "10"
+RATE_LIMIT_REQUESTS_PER_MINUTE = "60"
+
+[[r2_buckets]]
+binding = "IMAGE_BUCKET"
+bucket_name = "image-hosting"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "your-kv-namespace-id"
