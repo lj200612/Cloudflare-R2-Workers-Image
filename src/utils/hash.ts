@@ -23,3 +23,8 @@ export async function hashIp(ip: string): Promise<string> {
   const hex = await sha256Hex(encoder.encode(ip).buffer as ArrayBuffer);
   return hex.slice(0, 16);
 }
+
+export async function hashToken(token: string): Promise<string> {
+  const encoder = new TextEncoder();
+  return sha256Hex(encoder.encode(token).buffer as ArrayBuffer);
+}

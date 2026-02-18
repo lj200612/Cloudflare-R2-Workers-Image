@@ -39,7 +39,7 @@ test('putImage passes metadata and headers to bucket.put', async () => {
     originalName: 'demo.png',
     uploadedAt: '2026-01-01T00:00:00.000Z',
     uploaderIpHash: 'abc',
-    deleteToken: 'token',
+    deleteTokenHash: 'token-hash',
     sizeBytes: 10,
   };
 
@@ -50,7 +50,7 @@ test('putImage passes metadata and headers to bucket.put', async () => {
   const call = put.mock.calls[0];
   assert.equal(call.arguments[0], 'images/h.png');
   assert.equal(call.arguments[2].httpMetadata.contentType, 'image/png');
-  assert.equal(call.arguments[2].customMetadata.deleteToken, 'token');
+  assert.equal(call.arguments[2].customMetadata.deleteTokenHash, 'token-hash');
   assert.equal(call.arguments[2].customMetadata.sizeBytes, '10');
 });
 

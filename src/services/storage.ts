@@ -36,7 +36,7 @@ export async function putImage(
       originalName: metadata.originalName,
       uploadedAt: metadata.uploadedAt,
       uploaderIpHash: metadata.uploaderIpHash,
-      deleteToken: metadata.deleteToken,
+      deleteTokenHash: metadata.deleteTokenHash,
       sizeBytes: String(metadata.sizeBytes),
     },
   });

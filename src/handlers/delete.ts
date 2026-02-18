@@ -1,6 +1,7 @@
 import type { Env } from '../types';
 import { findKeyById, deleteImage } from '../services/storage';
 import { verifyAuth } from '../middleware/auth';
+import { hashToken } from '../utils/hash';
 import { successResponse, errorResponse } from '../utils/response';
 
 export async function handleDelete(
@@ -27,8 +28,21 @@ export async function handleDelete(
     if (!obj) {
       return errorResponse('Image not found', 404);
     }
-    const storedToken = obj.customMetadata?.deleteToken;
-    if (!storedToken || storedToken !== deleteToken) {
+
+    const storedHash = obj.customMetadata?.deleteTokenHash;
+    const legacyToken = obj.customMetadata?.deleteToken; // backward compat for pre-existing objects
+
+    let tokenValid = false;
+    if (storedHash) {
+      // New format: compare SHA-256 hash of the provided token
+      const providedHash = await hashToken(deleteToken);
+      tokenValid = providedHash === storedHash;
+    } else if (legacyToken) {
+      // Legacy format: plain-text comparison for objects uploaded before this change
+      tokenValid = deleteToken === legacyToken;
+    }
+
+    if (!tokenValid) {
       return errorResponse('Invalid delete token', 403);
     }
   }

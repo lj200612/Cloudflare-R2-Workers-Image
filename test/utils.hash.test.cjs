@@ -6,6 +6,7 @@ const {
   contentHash,
   generateDeleteToken,
   hashIp,
+  hashToken,
 } = require('../.test-dist/src/utils/hash.js');
 
 test('sha256Hex matches known digest for abc', async () => {
@@ -40,4 +41,22 @@ test('hashIp returns stable 16-hex hash', async () => {
   assert.equal(h1.length, 16);
   assert.equal(h1, h2);
   assert.notEqual(h1, h3);
+});
+
+test('hashToken returns full 64-hex SHA-256 and is deterministic', async () => {
+  const h1 = await hashToken('my-delete-token');
+  const h2 = await hashToken('my-delete-token');
+  const h3 = await hashToken('other-token');
+
+  assert.equal(h1.length, 64);
+  assert.match(h1, /^[0-9a-f]{64}$/);
+  assert.equal(h1, h2);
+  assert.notEqual(h1, h3);
+});
+
+test('hashToken matches node:crypto SHA-256', async () => {
+  const { createHash } = require('node:crypto');
+  const expected = createHash('sha256').update('test-value').digest('hex');
+  const actual = await hashToken('test-value');
+  assert.equal(actual, expected);
 });

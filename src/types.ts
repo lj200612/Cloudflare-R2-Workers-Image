@@ -10,13 +10,15 @@ export interface Env {
   ENABLE_IMAGE_RESIZING: string;
   RATE_LIMIT_UPLOADS_PER_MINUTE: string;
   RATE_LIMIT_REQUESTS_PER_MINUTE: string;
+  // Optional: bind an Analytics Engine dataset in wrangler.toml for query-able metrics
+  ANALYTICS?: AnalyticsEngineDataset;
 }
 
 export interface ImageMetadata {
   originalName: string;
   uploadedAt: string;
   uploaderIpHash: string;
-  deleteToken: string;
+  deleteTokenHash: string;
   sizeBytes: number;
 }
 

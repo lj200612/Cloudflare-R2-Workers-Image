@@ -1,7 +1,7 @@
 import type { Env, ImageMetadata, UploadResult } from '../types';
 import { detectImageType } from '../services/image';
 import { buildKey, putImage, findKeyById, parseKey, mimeFromExt } from '../services/storage';
-import { contentHash, generateDeleteToken, hashIp } from '../utils/hash';
+import { contentHash, generateDeleteToken, hashIp, hashToken } from '../utils/hash';
 import { parseMaxFileSize, sanitizeFilename } from '../utils/validation';
 import { successResponse, errorResponse } from '../utils/response';
 
@@ -52,11 +52,12 @@ export async function handleUpload(request: Request, env: Env): Promise<Response
   if (existing) {
     const baseUrl = env.BASE_URL || `https://${request.headers.get('Host') || 'localhost'}`;
     const id = `${hash}.${detected.ext}`;
-    const existingMeta = existing.customMetadata || {};
     return successResponse<UploadResult>({
       id,
       url: `${baseUrl}/images/${id}`,
-      deleteToken: existingMeta.deleteToken || '',
+      // Cannot recover the original delete token from the stored hash.
+      // Use the admin API_TOKEN to delete this image if needed.
+      deleteToken: '',
       size: existing.size,
       type: detected.mime,
     });
@@ -65,13 +66,14 @@ export async function handleUpload(request: Request, env: Env): Promise<Response
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
   const now = new Date().toISOString();
   const deleteToken = await generateDeleteToken(hash, now);
+  const deleteTokenHash = await hashToken(deleteToken);
   const ipHash = await hashIp(ip);
 
   const metadata: ImageMetadata = {
     originalName,
     uploadedAt: now,
     uploaderIpHash: ipHash,
-    deleteToken,
+    deleteTokenHash,
     sizeBytes: fileData.byteLength,
   };
 

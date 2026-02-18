@@ -54,7 +54,7 @@ test('handleUpload rejects unsupported format', async () => {
 test('handleUpload returns existing object metadata for duplicate content', async () => {
   const head = mock.fn(async () => ({
     size: 999,
-    customMetadata: { deleteToken: 'existing-delete-token' },
+    customMetadata: { deleteTokenHash: 'some-stored-hash' },
   }));
   const put = mock.fn(async () => ({}));
   const env = createBaseEnv({ head, put });
@@ -68,11 +68,13 @@ test('handleUpload returns existing object metadata for duplicate content', asyn
 
   assert.equal(response.status, 200);
   assert.equal(body.success, true);
-  assert.equal(body.data.deleteToken, 'existing-delete-token');
+  // Cannot recover original token from stored hash — empty string is expected
+  assert.equal(body.data.deleteToken, '');
   assert.equal(put.mock.callCount(), 0);
 });
 
 test('handleUpload stores raw upload and returns 201', async () => {
+  const { createHash } = require('node:crypto');
   let captured = null;
   const env = createBaseEnv({
     head: async () => null,
@@ -100,6 +102,17 @@ test('handleUpload stores raw upload and returns 201', async () => {
   assert.ok(captured);
   assert.equal(captured.size, TRANSPARENT_PIXEL.byteLength);
   assert.equal(captured.options.customMetadata.originalName, 'demo.png');
+
+  // Verify deleteTokenHash is stored and is a valid 64-hex SHA-256
+  const storedHash = captured.options.customMetadata.deleteTokenHash;
+  assert.ok(storedHash, 'deleteTokenHash should be present in stored metadata');
+  assert.match(storedHash, /^[0-9a-f]{64}$/, 'deleteTokenHash should be 64-char hex');
+
+  // Verify the returned deleteToken hashes to the stored deleteTokenHash
+  const returnedToken = body.data.deleteToken;
+  assert.ok(returnedToken, 'deleteToken should be returned on first upload');
+  const expectedHash = createHash('sha256').update(returnedToken).digest('hex');
+  assert.equal(storedHash, expectedHash, 'stored hash should match SHA-256 of returned token');
 });
 
 test('handleUpload handles multipart request and sanitizes file name', async () => {
