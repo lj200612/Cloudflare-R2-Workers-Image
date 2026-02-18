@@ -23,3 +23,9 @@ class_name = "RateLimitDurableObject"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RateLimitDurableObject"]
+
+# Optional: enable Cloudflare Analytics Engine for query-able metrics (Workers Paid plan required).
+# Uncomment the block below and run `wrangler deploy` to activate.
+# [[analytics_engine_datasets]]
+# binding = "ANALYTICS"
+# dataset = "image-hosting-analytics"

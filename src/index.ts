@@ -9,6 +9,7 @@ import { handleDelete, handleBulkDelete } from './handlers/delete';
 import { handleList } from './handlers/list';
 import { handleInfo } from './handlers/info';
 import { errorResponse, successResponse } from './utils/response';
+import { logRequest } from './utils/analytics';
 
 type RouteParams = Record<string, string>;
 type RouteMatch = (path: string) => RouteParams | null;
@@ -82,6 +83,7 @@ const routes: RouteDefinition[] = [
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const start = Date.now();
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method;
@@ -92,11 +94,13 @@ export default {
     }
 
     let response: Response;
+    let caughtError: string | undefined;
 
     try {
       response = await route(request, env, method, path);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Internal server error';
+      caughtError = message;
       response = errorResponse(message, 500);
     }
 
@@ -105,6 +109,14 @@ export default {
     for (const [key, value] of Object.entries(cors)) {
       response.headers.set(key, value);
     }
+
+    logRequest(env, {
+      method,
+      path,
+      status: response.status,
+      durationMs: Date.now() - start,
+      ...(caughtError ? { error: caughtError } : {}),
+    });
 
     return response;
   },
